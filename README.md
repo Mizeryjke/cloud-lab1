@@ -9,12 +9,21 @@ http://cloud-lab1-alb-1417131122.eu-north-1.elb.amazonaws.com/docs
 
 ## Структура проєкту
 cloud-lab1/
+
+```text
+cloud-lab1/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml       # GitHub Actions Workflow (CI/CD)
 ├── app/
-│   ├── main.py          # Код REST API (FastAPI + SQLAlchemy)
-│   └── requirements.txt # Залежності Python
-├── terraform/           # Опис інфраструктури AWS (VPC, ECR, RDS, ALB, ECS)
-├── .github/workflows/
-│   └── deploy.yml       # GitHub Actions Workflow (CI/CD)
-├── Dockerfile           # Фіксований базовий образ, non-root user
-├── compose.yaml         # Локальне середовище (API + Postgres з volume)
-└── README.md            # Документація проєкту
+│   ├── main.py              # Код REST API (FastAPI + SQLAlchemy)
+│   └── requirements.txt     # Залежності Python
+├── terraform/               # Опис інфраструктури AWS (VPC, ECR, RDS, ALB, ECS)
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── terraform.tfvars
+│   └── variables.tf
+├── .gitignore               # Ігнорування секретів та тимчасових файлів
+├── compose.yaml             # Локальне середовище (API + Postgres з volume)
+├── Dockerfile               # Фіксований базовий образ, non-root user
+└── README.md                # Документація проєкту
