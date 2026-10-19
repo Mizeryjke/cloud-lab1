@@ -181,7 +181,6 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# --- 6. КОНТЕЙНЕРНИЙ СЕРВІС (ECS Fargate - Завдання 2) ---
 resource "aws_ecs_cluster" "cluster" {
   name = "${var.project_name}-cluster"
 }
