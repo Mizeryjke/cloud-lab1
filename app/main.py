@@ -18,7 +18,7 @@ class ItemModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Cloud Lab 1 API", version="1.0.0")
+app = FastAPI(title="Cloud Lab 1 API", version="1.0.1")
 
 class ItemCreate(BaseModel):
     name: str
