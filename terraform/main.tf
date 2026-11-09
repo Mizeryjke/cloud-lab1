@@ -183,6 +183,11 @@ resource "aws_lb_listener" "http" {
 
 resource "aws_ecs_cluster" "cluster" {
   name = "${var.project_name}-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
 }
 
 resource "aws_iam_role" "ecs_task_execution_role" {
@@ -210,20 +215,38 @@ resource "aws_ecs_task_definition" "app" {
   memory                   = "512"
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
 
-  container_definitions = jsonencode([{
-    name      = "api"
-    image     = "${aws_ecr_repository.app.repository_url}:latest"
-    essential = true
-    portMappings = [{
-      containerPort = 8000
-      hostPort      = 8000
-      protocol      = "tcp"
-    }]
-    environment = [{
-      name  = "DATABASE_URL"
-      value = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-    }]
-  }])
+  container_definitions = jsonencode([
+    {
+      name      = "api"
+      image     = "${aws_ecr_repository.app.repository_url}:latest"
+      essential = true
+      portMappings = [{
+        containerPort = 8000
+        hostPort      = 8000
+        protocol      = "tcp"
+      }]
+      environment = [
+        {
+          name  = "DATABASE_URL"
+          value = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+        },
+        {
+          name  = "REDIS_HOST"
+          value = "localhost"
+        }
+      ]
+    },
+    {
+      name      = "redis"
+      image     = "redis:7-alpine"
+      essential = true
+      portMappings = [{
+        containerPort = 6379
+        hostPort      = 6379
+        protocol      = "tcp"
+      }]
+    }
+  ])
 }
 
 resource "aws_ecs_service" "service" {
@@ -246,4 +269,148 @@ resource "aws_ecs_service" "service" {
   }
 
   depends_on = [aws_lb_listener.http]
+}
+
+resource "aws_appautoscaling_target" "ecs_target" {
+  max_capacity       = 4
+  min_capacity       = 1
+  resource_id        = "service/${aws_ecs_cluster.cluster.name}/${aws_ecs_service.service.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "ecs_policy_cpu" {
+  name               = "${var.project_name}-cpu-autoscaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs_target.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    target_value       = 60.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+  }
+}
+
+resource "aws_sns_topic" "alerts" {
+  name = "${var.project_name}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email_subscription" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = "${var.project_name}-cpu-high-alarm"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 70
+  alarm_description   = "Alarm when ECS CPU exceeds 70% for 2 minutes"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.cluster.name
+    ServiceName = aws_ecs_service.service.name
+  }
+}
+
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "${var.project_name}-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ECS", "DesiredTaskCount", "ServiceName", aws_ecs_service.service.name, "ClusterName", aws_ecs_cluster.cluster.name],
+            [".", "RunningTaskCount", ".", ".", ".", "."]
+          ]
+          period = 60
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Кількість екземплярів (Desired vs Running)"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ECS", "CPUUtilization", "ServiceName", aws_ecs_service.service.name, "ClusterName", aws_ecs_cluster.cluster.name]
+          ]
+          period = 60
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Завантаження CPU (%)"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", aws_lb.alb.arn_suffix]
+          ]
+          period = 60
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Кількість запитів за хвилину"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.alb.arn_suffix, { extendedStatistics = ["p95"] }]
+          ]
+          period = 60
+          region = var.aws_region
+          title  = "Латентність p95 (сек)"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", aws_lb.alb.arn_suffix]
+          ]
+          period = 60
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Помилки 5xx"
+        }
+      }
+    ]
+  })
 }

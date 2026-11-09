@@ -1,14 +1,20 @@
 import os
-from fastapi import FastAPI, Depends, status
+import json
+from typing import List
+from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
+import redis
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgrespassword@db:5432/appdb")
-
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgrespassword@localhost:5432/appdb")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+cache = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
 
 class ItemModel(Base):
     __tablename__ = "items"
@@ -17,11 +23,6 @@ class ItemModel(Base):
     description = Column(String, nullable=True)
 
 Base.metadata.create_all(bind=engine)
-
-app = FastAPI(
-    title="Device Management API",
-    version="1.0.1"
-)
 
 class ItemCreate(BaseModel):
     name: str
@@ -32,6 +33,8 @@ class ItemResponse(ItemCreate):
     class Config:
         from_attributes = True
 
+app = FastAPI(title="Cloud Lab 2 API", version="2.0.0")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -41,11 +44,33 @@ def get_db():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    redis_status = "ok"
+    try:
+        cache.ping()
+    except Exception:
+        redis_status = "unreachable"
+    return {"status": "ok", "redis": redis_status}
 
-@app.get("/items", response_model=list[ItemResponse])
+@app.get("/items", response_model=List[ItemResponse])
 def get_items(db: Session = Depends(get_db)):
-    return db.query(ItemModel).all()
+    cache_key = "all_items"
+    
+    try:
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return json.loads(cached_data)
+    except Exception:
+        pass
+
+    items = db.query(ItemModel).all()
+    result = [{"id": item.id, "name": item.name, "description": item.description} for item in items]
+
+    try:
+        cache.setex(cache_key, 40, json.dumps(result))
+    except Exception:
+        pass
+
+    return result
 
 @app.post("/items", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
 def create_item(item: ItemCreate, db: Session = Depends(get_db)):
@@ -53,4 +78,10 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db)):
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
+    
+    try:
+        cache.delete("all_items")
+    except Exception:
+        pass
+
     return db_item
