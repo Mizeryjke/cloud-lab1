@@ -23,5 +23,5 @@ variable "db_name" {
 variable "alert_email" {
   description = "Email для отримання сповіщень CloudWatch Alarms"
   type        = string
-  default     = "твій_email@gmail.com" # Вкажи власну пошту
+  default     = "romkokotsyr@gmail.com"
 }

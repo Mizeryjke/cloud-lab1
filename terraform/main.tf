@@ -388,9 +388,10 @@ resource "aws_cloudwatch_dashboard" "main" {
         height = 6
         properties = {
           metrics = [
-            ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.alb.arn_suffix, { extendedStatistics = ["p95"] }]
+            ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.alb.arn_suffix]
           ]
           period = 60
+          stat   = "p95"
           region = var.aws_region
           title  = "Латентність p95 (сек)"
         }
