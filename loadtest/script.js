@@ -9,7 +9,7 @@ export const options = {
   ],
 };
 
-const BASE_URL = __ENV.TARGET_URL || 'http://ВАШ_ALB_DNS.eu-north-1.elb.amazonaws.com';
+const BASE_URL = __ENV.TARGET_URL || 'http://cloud-lab1-alb-1417131122.eu-north-1.elb.amazonaws.com';
 
 export default function () {
   const payload = JSON.stringify({
