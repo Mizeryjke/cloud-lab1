@@ -415,3 +415,30 @@ resource "aws_cloudwatch_dashboard" "main" {
     ]
   })
 }
+
+
+resource "aws_appautoscaling_scheduled_action" "scale_out_day" {
+  name               = "${var.project_name}-scale-out-day"
+  service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+  resource_id        = aws_appautoscaling_target.ecs_target.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
+  schedule           = "cron(0 8 * * ? *)"
+
+  scalable_target_action {
+    min_capacity = 2
+    max_capacity = 4
+  }
+}
+
+resource "aws_appautoscaling_scheduled_action" "scale_in_night" {
+  name               = "${var.project_name}-scale-in-night"
+  service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+  resource_id        = aws_appautoscaling_target.ecs_target.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
+  schedule           = "cron(0 20 * * ? *)"
+
+  scalable_target_action {
+    min_capacity = 1
+    max_capacity = 4
+  }
+}
